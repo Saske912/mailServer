@@ -1,0 +1,3 @@
+mail._domainkey	IN	TXT	( "v=DKIM1; h=sha256; k=rsa; s=email; "
+	  "p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA6whnJk+BQjJC9/f125+daZqmdw7vWbPyetUVl02qSxbdyETxtI/3JbRHJw4AtE9OF7teSfnGWdbw4nQ4aCZgBHXyUtFD8+rTYGa4jFRdrajOC1xA3HbAWoMd0IKvKeddlIlvmo1rElH3lkCbhtRPIgDSOAjf6JRvHn/ELf9XMD7EZRB+mw62iEzBHBRf9948YFlzvQat484VQX"
+	  "lZej9gWRNLiKo/tHvCTL2M1M8u3yWOynPzvSSCpDbco2fLlhxkVcCGkss3AR0ZsoNOGx83JRz4y4ewEumUfdPSNECcPDffNV3YT4zxOvj+29pg2fxQcnAZZ1NLfZMLsjiAJ1mUwwIDAQAB" )  ; ----- DKIM key mail for kolve.ru
