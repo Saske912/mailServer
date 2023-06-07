@@ -219,13 +219,17 @@ resource "kubernetes_ingress_v1" "mail-server" {
   }
 }
 
+data "vault_generic_secret" "microtik_home" {
+  path = "kv/mikrotiks/home"
+}
+
 provider "mikrotik" {
-  host     = "10.0.0.1"  # Or set MIKROTIK_HOST environment variable
-  username = "admin"     # Or set MIKROTIK_USER environment variable
-  password = "Saske912!" # Or set MIKROTIK_PASSWORD environment variable
-  # tls            = true                          # Or set MIKROTIK_TLS environment variable
-  # ca_certificate = "/path/to/ca/certificate.pem" # Or set MIKROTIK_CA_CERTIFICATE environment variable
-  # insecure = true # Or set MIKROTIK_INSECURE environment variable
+  host           = "${data.vault_generic_secret.microtik_home.data["host"]}:8728" # Or set MIKROTIK_HOST environment variable
+  username       = data.vault_generic_secret.microtik_home.data["username"]       # Or set MIKROTIK_USER environment variable
+  password       = data.vault_generic_secret.microtik_home.data["password"]       # Or set MIKROTIK_PASSWORD environment variable
+  tls            = true                                                           # Or set MIKROTIK_TLS environment variable
+  ca_certificate = "cert_export_ServerCA_home.crt"                                # Or set MIKROTIK_CA_CERTIFICATE environment variable
+  insecure       = true                                                           # Or set MIKROTIK_INSECURE environment variable
 }
 
 resource "mikrotik_firewall_nat" "nat_rule" {
