@@ -12,11 +12,15 @@ terraform {
       source  = "hashicorp/kubernetes"
       version = "2.20.0"
     }
-    mikrotik = {
-      source  = "kube-cloud/mikrotik"
-      version = "0.12.0"
+    kubectl = {
+      source  = "gavinbunney/kubectl"
+      version = "1.14.0"
     }
   }
+}
+
+provider "kubectl" {
+  config_path = "~/.kube/config"
 }
 
 provider "vault" {
@@ -27,41 +31,6 @@ provider "kubernetes" {
   config_path = "~/.kube/config"
 }
 
-data "vault_generic_secret" "cloudflare" {
-  path = "kv/cloudflare"
-}
-
-provider "cloudflare" {
-  api_token = data.vault_generic_secret.cloudflare.data["token"]
-}
-
-resource "cloudflare_record" "spf" {
-  zone_id = jsondecode(data.vault_generic_secret.cloudflare.data["zone"]).kolve
-  name    = "kolve.ru"
-  type    = "TXT"
-  value   = "v=spf1 redirect=_spf.mail.ru +a +mx ~all"
-  ttl     = 1
-}
-
-resource "cloudflare_record" "dmark" {
-  zone_id = jsondecode(data.vault_generic_secret.cloudflare.data["zone"]).kolve
-  name    = "_dmarc"
-  type    = "TXT"
-  value   = "v=DMARC1; p=reject; rua=mailto:saveloy@yandex.ru"
-  ttl     = 1
-}
-
-data "vault_generic_secret" "dkim" {
-  path = "kv/dkim-keys/kolve.ru"
-}
-
-resource "cloudflare_record" "dkim" {
-  zone_id = jsondecode(data.vault_generic_secret.cloudflare.data["zone"]).kolve
-  name    = "mail._domainkey"
-  value   = "v=DKIM1; h=sha256; k=rsa; s=email; p=${data.vault_generic_secret.dkim.data.public_key}"
-  type    = "TXT"
-  ttl     = 3600
-}
 
 resource "kubernetes_namespace_v1" "mail-server" {
   metadata {
@@ -69,24 +38,6 @@ resource "kubernetes_namespace_v1" "mail-server" {
   }
 }
 
-resource "kubernetes_persistent_volume_claim_v1" "vmail" {
-  metadata {
-    namespace = "mail-server"
-    name      = "vmail"
-    labels = {
-      "storage" = "vmail"
-    }
-  }
-  spec {
-    access_modes = ["ReadWriteOnce"]
-    resources {
-      requests = {
-        storage = "5Gi"
-      }
-    }
-  }
-  depends_on = [kubernetes_namespace_v1.mail-server]
-}
 
 variable "name" {
   default = "mail-server"
@@ -103,15 +54,64 @@ resource "kubernetes_config_map_v1" "mail-server" {
     namespace = var.name
   }
   data = {
-    "HOSTNAME"                         = data.vault_generic_secret.mail.data["HOSTNAME"]
+    "HOSTNAME"          = data.vault_generic_secret.mail.data["HOSTNAME"]
+    "FIRST_MAIL_DOMAIN" = data.vault_generic_secret.mail.data["FIRST_MAIL_DOMAIN"]
+    "POSTMASTER_EMAIL"  = data.vault_generic_secret.mail.data["POSTMASTER_EMAIL"]
+    //disable clamav
+    "clamav" = ""
+  }
+}
+
+resource "kubernetes_secret_v1" "mail-server" {
+  metadata {
+    name      = var.name
+    namespace = var.name
+  }
+  data = {
     "FIRST_MAIL_DOMAIN_ADMIN_PASSWORD" = data.vault_generic_secret.mail.data["FIRST_MAIL_DOMAIN_ADMIN_PASSWORD"]
-    "FIRST_MAIL_DOMAIN"                = data.vault_generic_secret.mail.data["FIRST_MAIL_DOMAIN"]
     "MLMMJADMIN_API_TOKEN"             = data.vault_generic_secret.mail.data["MLMMJADMIN_API_TOKEN"]
     "ROUNDCUBE_DES_KEY"                = data.vault_generic_secret.mail.data["ROUNDCUBE_DES_KEY"]
+    "AMAVISD_DB_PASSWORD"              = data.vault_generic_secret.mail.data["AMAVISD_DB_PASSWORD"]
+  }
+}
+
+resource "kubectl_manifest" "my-flora-dot-shop" {
+  yaml_body = <<EOT
+apiVersion: "cert-manager.io/v1"
+kind: "Certificate"
+metadata:
+  name: "mail"
+  namespace: "mail-server"
+spec:
+  secretName: "mail-tls"
+  additionalOutputFormats:
+  - type: CombinedPEM
+  issuerRef:
+    name: "pfile"
+    kind: "ClusterIssuer"
+    group: "cert-manager.io"
+  dnsNames:
+  - "kolve.ru"
+  - "mail.my-flora.shop"
+  - "my-flora.shop"
+EOT
+}
+
+resource "kubernetes_secret" "dkim" {
+  metadata {
+    name      = "dkim"
+    namespace = var.name
+  }
+
+  data = {
+    "kolve.ru.pem"      = file("kolve.ru.pem")
+    "my-flora.shop.pem" = file("my-flora.shop.pem")
   }
 }
 
 resource "kubernetes_deployment_v1" "mail-server" {
+  depends_on = [kubernetes_persistent_volume_claim_v1.clamav, kubernetes_persistent_volume_claim_v1.mysql,
+  kubernetes_persistent_volume_claim_v1.vmail, kubectl_manifest.my-flora-dot-shop]
   metadata {
     name      = "mail-server"
     namespace = var.name
@@ -140,20 +140,201 @@ resource "kubernetes_deployment_v1" "mail-server" {
             name       = "vmail"
             mount_path = "/var/vmail"
           }
+          volume_mount {
+            name       = "mysql"
+            mount_path = "/var/lib/mysql"
+          }
+          volume_mount {
+            name       = "clamav"
+            mount_path = "/var/lib/clamav"
+          }
+          volume_mount {
+            name       = "spamassassin"
+            mount_path = "/var/lib/spamassassin"
+          }
+          volume_mount {
+            name       = "postfix"
+            mount_path = "/var/spool/postfix"
+          }
+          volume_mount {
+            name       = "custom"
+            mount_path = "/opt/iredmail/custom"
+          }
           port {
             container_port = 80
+            name           = "http"
           }
           port {
             container_port = 443
+            name           = "https"
+          }
+          port {
+            container_port = 110
+            name           = "pop3-tls"
+          }
+          port {
+            container_port = 995
+            name           = "pop3-ssl"
+          }
+          port {
+            container_port = 143
+            name           = "imap-tls"
+          }
+          port {
+            container_port = 993
+            name           = "imap-ssl"
+          }
+          port {
+            container_port = 25
+            name           = "smtp"
+          }
+          port {
+            container_port = 465
+            name           = "smtp-ssl"
+          }
+          port {
+            container_port = 587
+            name           = "smtp-tls"
+          }
+          port {
+            container_port = 4190
+            name           = "managesieve"
           }
           env_from {
             config_map_ref {
               name = var.name
             }
           }
+          env_from {
+            secret_ref {
+              name = var.name
+            }
+          }
+          volume_mount {
+            name       = "key"
+            mount_path = "/opt/iredmail/ssl/key.pem"
+            sub_path   = "key.pem"
+            read_only  = true
+          }
+          volume_mount {
+            name       = "cert"
+            mount_path = "/opt/iredmail/ssl/cert.pem"
+            sub_path   = "cert.pem"
+            read_only  = true
+          }
+          volume_mount {
+            name       = "combined"
+            mount_path = "/opt/iredmail/ssl/combined.pem"
+            sub_path   = "combined.pem"
+            read_only  = true
+          }
+          volume_mount {
+            name       = "clamfail"
+            mount_path = "/etc/supervisor/conf.d/clamav.conf"
+            sub_path   = "clamav.conf"
+          }
+          volume_mount {
+            name       = "amavis"
+            mount_path = "/etc/amavis/conf.d/50-user"
+            sub_path   = "50-user"
+          }
+          volume_mount {
+            name       = "dkim"
+            mount_path = "/opt/iredmail/custom/amavisd/dkim"
+            read_only  = true
+          }
         }
         volume {
           name = "vmail"
+          persistent_volume_claim {
+            claim_name = "vmail"
+          }
+        }
+        volume {
+          name = "custom"
+          persistent_volume_claim {
+            claim_name = "custom"
+          }
+        }
+        volume {
+          name = "mysql"
+          persistent_volume_claim {
+            claim_name = "mysql"
+          }
+        }
+        volume {
+          name = "clamav"
+          persistent_volume_claim {
+            claim_name = "clamav"
+          }
+        }
+        volume {
+          name = "spamassassin"
+          persistent_volume_claim {
+            claim_name = "spamassassin"
+          }
+        }
+        volume {
+          name = "postfix"
+          persistent_volume_claim {
+            claim_name = "postfix"
+          }
+        }
+        volume {
+          name = "amavis"
+          config_map {
+            name = "amavis"
+            items {
+              key  = "amavis"
+              path = "50-user"
+            }
+          }
+        }
+        volume {
+          name = "clamfail"
+          config_map {
+            name = var.name
+            items {
+              key  = "clamav"
+              path = "clamav.conf"
+            }
+          }
+        }
+        volume {
+          name = "combined"
+          secret {
+            secret_name = "mail-tls"
+            items {
+              key  = "tls-combined.pem"
+              path = "combined.pem"
+            }
+          }
+        }
+        volume {
+          name = "key"
+          secret {
+            secret_name = "mail-tls"
+            items {
+              key  = "tls.key"
+              path = "key.pem"
+            }
+          }
+        }
+        volume {
+          name = "cert"
+          secret {
+            secret_name = "mail-tls"
+            items {
+              key  = "tls.crt"
+              path = "cert.pem"
+            }
+          }
+        }
+        volume {
+          name = "dkim"
+          secret {
+            secret_name = "dkim"
+          }
         }
       }
     }
@@ -174,12 +355,54 @@ resource "kubernetes_service_v1" "mail-server" {
       "app" = "mail-server"
     }
     port {
-      port = 80
-      name = "http"
+      port        = 80
+      name        = "http"
+      target_port = "http"
     }
     port {
-      port = 443
-      name = "https"
+      port        = 443
+      name        = "https"
+      target_port = "https"
+    }
+    port {
+      port        = 110
+      name        = "pop3-tls"
+      target_port = "pop3-tls"
+    }
+    port {
+      port        = 25
+      name        = "smtp"
+      target_port = "smtp"
+    }
+    port {
+      port        = 465
+      name        = "smtp-ssl"
+      target_port = "smtp-ssl"
+    }
+    port {
+      port        = 587
+      name        = "smtp-tls"
+      target_port = "smtp-tls"
+    }
+    port {
+      port        = 143
+      name        = "imap-tls"
+      target_port = "imap-tls"
+    }
+    port {
+      port        = 993
+      name        = "imap-ssl"
+      target_port = "imap-ssl"
+    }
+    port {
+      port        = 995
+      name        = "pop3-ssl"
+      target_port = "pop3-ssl"
+    }
+    port {
+      port        = 4190
+      name        = "managesieve"
+      target_port = "managesieve"
     }
   }
 }
@@ -218,32 +441,3 @@ resource "kubernetes_ingress_v1" "mail-server" {
     }
   }
 }
-
-data "vault_generic_secret" "microtik_home" {
-  path = "kv/mikrotiks/home"
-}
-
-provider "mikrotik" {
-  host           = "${data.vault_generic_secret.microtik_home.data["host"]}:8728" # Or set MIKROTIK_HOST environment variable
-  username       = data.vault_generic_secret.microtik_home.data["username"]       # Or set MIKROTIK_USER environment variable
-  password       = data.vault_generic_secret.microtik_home.data["password"]       # Or set MIKROTIK_PASSWORD environment variable
-  tls            = true                                                           # Or set MIKROTIK_TLS environment variable
-  ca_certificate = "cert_export_ServerCA_home.crt"                                # Or set MIKROTIK_CA_CERTIFICATE environment variable
-  insecure       = true                                                           # Or set MIKROTIK_INSECURE environment variable
-}
-
-resource "mikrotik_firewall_nat" "nat_rule" {
-  chain               = "dstnat"
-  action              = "dst-nat"
-  destination_port    = "465"
-  protocol            = "tcp"
-  destination_address = "10.0.0.45"
-  in_interface        = "ether1"
-  in_bridge_port      = "465"
-}
-
-# resource "mikrotik_dns_record" "record" {
-#   name    = "example.domain.com"
-#   address = "192.168.88.1"
-#   ttl     = 300
-# }
