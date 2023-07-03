@@ -94,6 +94,7 @@ spec:
   - "kolve.ru"
   - "mail.my-flora.shop"
   - "my-flora.shop"
+  - "develop.kolve.ru"
 EOT
 }
 
@@ -189,16 +190,8 @@ resource "kubernetes_deployment_v1" "mail-server" {
             name           = "smtp"
           }
           port {
-            container_port = 465
-            name           = "smtp-ssl"
-          }
-          port {
             container_port = 587
             name           = "smtp-tls"
-          }
-          port {
-            container_port = 4190
-            name           = "managesieve"
           }
           env_from {
             config_map_ref {
@@ -368,41 +361,37 @@ resource "kubernetes_service_v1" "mail-server" {
       port        = 110
       name        = "pop3-tls"
       target_port = "pop3-tls"
+      node_port   = 31726
     }
     port {
       port        = 25
       name        = "smtp"
       target_port = "smtp"
-    }
-    port {
-      port        = 465
-      name        = "smtp-ssl"
-      target_port = "smtp-ssl"
+      node_port   = 30781
     }
     port {
       port        = 587
       name        = "smtp-tls"
       target_port = "smtp-tls"
+      node_port   = 32658
     }
     port {
       port        = 143
       name        = "imap-tls"
       target_port = "imap-tls"
+      node_port   = 32314
     }
     port {
       port        = 993
       name        = "imap-ssl"
       target_port = "imap-ssl"
+      node_port   = 30918
     }
     port {
       port        = 995
       name        = "pop3-ssl"
       target_port = "pop3-ssl"
-    }
-    port {
-      port        = 4190
-      name        = "managesieve"
-      target_port = "managesieve"
+      node_port   = 32336
     }
   }
 }
