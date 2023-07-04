@@ -43,6 +43,13 @@ variable "name" {
   default = "mail-server"
 }
 
+variable "cert_domains" {
+  type = list(string)
+  default = [
+    "kolve.ru", "my-flora.shop", "mail.my-flora.shop", "develop.kolve.ru"
+  ]
+}
+
 data "vault_generic_secret" "mail" {
   path = "kv/mail"
 }
@@ -91,24 +98,27 @@ spec:
     kind: "ClusterIssuer"
     group: "cert-manager.io"
   dnsNames:
-  - "kolve.ru"
-  - "mail.my-flora.shop"
-  - "my-flora.shop"
-  - "develop.kolve.ru"
+  %{for domain in var.cert_domains~}
+  - "${domain}"
+  %{endfor~}
 EOT
 }
 
-resource "kubernetes_secret" "dkim" {
-  metadata {
-    name      = "dkim"
-    namespace = var.name
-  }
-
-  data = {
-    "kolve.ru.pem"      = file("kolve.ru.pem")
-    "my-flora.shop.pem" = file("my-flora.shop.pem")
-  }
+resource "kubectl_manifest" "dkim" {
+  yaml_body = <<EOT
+apiVersion: v1
+kind: Secret
+metadata:
+  name: dkim
+  namespace: ${var.name}
+type: Opaque
+data:
+  %{for domain in var.domains~}
+  ${domain.dkim}: "${base64encode(file(domain.dkim))}"
+  %{endfor~}
+EOT
 }
+
 
 resource "kubernetes_deployment_v1" "mail-server" {
   depends_on = [kubernetes_persistent_volume_claim_v1.clamav, kubernetes_persistent_volume_claim_v1.mysql,

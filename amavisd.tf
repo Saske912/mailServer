@@ -1,10 +1,11 @@
 variable "domains" {
   type = list(object({
     name     = string,
-    selector = string
+    selector = string,
+    dkim     = string
   }))
-  default = [{ name = "my-flora.shop", selector = "flora" },
-  { name = "kolve.ru", selector = "kolve" }]
+  default = [{ name = "my-flora.shop", selector = "flora", dkim = "my-flora.shop.pem" },
+  { name = "kolve.ru", selector = "kolve", dkim = "kolve.ru.pem" }]
 }
 
 resource "kubernetes_config_map_v1" "amavis" {
