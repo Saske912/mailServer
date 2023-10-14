@@ -4,7 +4,7 @@ variable "domains" {
     selector = string,
     dkim     = string
   }))
-  default = [{ name = "my-flora.shop", selector = "flora", dkim = "my-flora.shop.pem" },
+  default = [
   { name = "kolve.ru", selector = "kolve", dkim = "kolve.ru.pem" }]
 }
 

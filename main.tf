@@ -1,7 +1,8 @@
 terraform {
   backend "kubernetes" {
-    secret_suffix = "mail-server"
-    config_path   = "~/.kube/config"
+    secret_suffix  = "mail-server"
+    config_path    = "~/.kube/config"
+    config_context = "default"
   }
   required_providers {
     cloudflare = {
@@ -16,19 +17,26 @@ terraform {
       source  = "gavinbunney/kubectl"
       version = "1.14.0"
     }
+    vault = {
+      source  = "hashicorp/vault"
+      version = "3.21.0"
+    }
   }
 }
 
 provider "kubectl" {
-  config_path = "~/.kube/config"
+  config_path    = "~/.kube/config"
+  config_context = "default"
 }
 
 provider "vault" {
-  address = "http://10.0.0.45:8200"
+  address            = "https://vault.kolve.ru"
+  add_address_to_env = true
 }
 
 provider "kubernetes" {
-  config_path = "~/.kube/config"
+  config_path    = "~/.kube/config"
+  config_context = "default"
 }
 
 
@@ -43,17 +51,20 @@ variable "name" {
   default = "mail-server"
 }
 
-variable "cert_domains" {
-  type = list(string)
-  default = [
-    "kolve.ru", "my-flora.shop", "mail.my-flora.shop", "develop.kolve.ru"
+variable "base_domain" {
+  type    = string
+  default = "kolve.ru"
+}
+
+locals {
+  cert_domains = [
+    var.base_domain, "use-namespace-user2.${var.base_domain}", "use-namespace-user1.${var.base_domain}"
   ]
 }
 
 data "vault_generic_secret" "mail" {
-  path = "kv/mail"
+  path = "secret/mail"
 }
-
 
 resource "kubernetes_config_map_v1" "mail-server" {
   metadata {
@@ -82,7 +93,7 @@ resource "kubernetes_secret_v1" "mail-server" {
   }
 }
 
-resource "kubectl_manifest" "my-flora-dot-shop" {
+resource "kubectl_manifest" "mail-tls" {
   yaml_body = <<EOT
 apiVersion: "cert-manager.io/v1"
 kind: "Certificate"
@@ -98,7 +109,7 @@ spec:
     kind: "ClusterIssuer"
     group: "cert-manager.io"
   dnsNames:
-  %{for domain in var.cert_domains~}
+  %{for domain in local.cert_domains~}
   - "${domain}"
   %{endfor~}
 EOT
@@ -122,7 +133,7 @@ EOT
 
 resource "kubernetes_deployment_v1" "mail-server" {
   depends_on = [kubernetes_persistent_volume_claim_v1.clamav, kubernetes_persistent_volume_claim_v1.mysql,
-  kubernetes_persistent_volume_claim_v1.vmail, kubectl_manifest.my-flora-dot-shop]
+  kubernetes_persistent_volume_claim_v1.vmail, kubectl_manifest.mail-tls]
   metadata {
     name      = "mail-server"
     namespace = var.name
@@ -167,10 +178,10 @@ resource "kubernetes_deployment_v1" "mail-server" {
             name       = "postfix"
             mount_path = "/var/spool/postfix"
           }
-          volume_mount {
-            name       = "custom"
-            mount_path = "/opt/iredmail/custom"
-          }
+          # volume_mount {
+          #   name       = "custom"
+          #   mount_path = "/opt/iredmail/custom"
+          # }
           port {
             container_port = 80
             name           = "http"
@@ -253,12 +264,12 @@ resource "kubernetes_deployment_v1" "mail-server" {
             claim_name = "vmail"
           }
         }
-        volume {
-          name = "custom"
-          persistent_volume_claim {
-            claim_name = "custom"
-          }
-        }
+        # volume {
+        #   name = "custom"
+        #   persistent_volume_claim {
+        #     claim_name = "custom"
+        #   }
+        # }
         volume {
           name = "mysql"
           persistent_volume_claim {
