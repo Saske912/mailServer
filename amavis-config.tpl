@@ -455,7 +455,7 @@ $enable_dkim_verification = 1;
 
 # Add dkim_key here.
 %{ for domain in domains ~}
-dkim_key("${domain.name}", "${domain.selector}", "/opt/iredmail/custom/amavisd/dkim/${domain.name}.pem");
+dkim_key("${domain.name}", "${domain.selector}", "/opt/iredmail/custom/amavisd/dkim/${domain.selector}.private");
 %{ endfor ~}
 
 @dkim_signature_options_bysender_maps = ({
@@ -558,7 +558,7 @@ $policy_bank{'NO_BAD_HEADER_CHECK'} = {
 #
 $do_syslog = 1;             # log via syslogd (preferred)
 $syslog_facility = 'mail';  # Syslog facility as a string
-$log_level = 0;             # Amavisd log level.
+$log_level = 2;             # Amavisd log level.
                             # Verbosity: 0, 1, 2, 3, 4, 5.
 $sa_debug = 0;              # SpamAssassin debugging (require $log_level).
                             # Default if off (0).

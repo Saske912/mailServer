@@ -56,12 +56,6 @@ variable "base_domain" {
   default = "kolve.ru"
 }
 
-locals {
-  cert_domains = [
-    var.base_domain, "use-namespace-user2.${var.base_domain}", "use-namespace-user1.${var.base_domain}"
-  ]
-}
-
 data "vault_generic_secret" "mail" {
   path = "secret/mail"
 }
@@ -109,27 +103,11 @@ spec:
     kind: "ClusterIssuer"
     group: "cert-manager.io"
   dnsNames:
-  %{for domain in local.cert_domains~}
-  - "${domain}"
-  %{endfor~}
-EOT
-}
-
-resource "kubectl_manifest" "dkim" {
-  yaml_body = <<EOT
-apiVersion: v1
-kind: Secret
-metadata:
-  name: dkim
-  namespace: ${var.name}
-type: Opaque
-data:
   %{for domain in var.domains~}
-  ${domain.dkim}: "${base64encode(file(domain.dkim))}"
+  - "${domain.name}"
   %{endfor~}
 EOT
 }
-
 
 resource "kubernetes_deployment_v1" "mail-server" {
   depends_on = [kubernetes_persistent_volume_claim_v1.clamav, kubernetes_persistent_volume_claim_v1.mysql,
@@ -155,6 +133,45 @@ resource "kubernetes_deployment_v1" "mail-server" {
         }
       }
       spec {
+        node_selector = {
+          external-ip   = "true"
+          fast-internet = "true"
+        }
+        volume {
+          empty_dir {}
+          name = "dkim"
+        }
+        dynamic "init_container" {
+          for_each = var.domains
+
+          content {
+            name    = "init-container-${init_container.key}"
+            image   = "instrumentisto/opendkim"
+            command = ["opendkim-genkey"]
+            args = [
+              "--subdomains",
+              "--domain=${init_container.value.name}",
+              "--selector=${init_container.value.selector}",
+              "--directory=/tmp"
+            ]
+            volume_mount {
+              mount_path = "/tmp"
+              name       = "dkim"
+              read_only  = false
+            }
+          }
+        }
+        init_container {
+          name    = "change-permissions"
+          image   = "alpine"
+          command = ["chmod"]
+          args    = ["-R", "755", "/tmp"]
+          volume_mount {
+            mount_path = "/tmp"
+            name       = "dkim"
+            read_only  = false
+          }
+        }
         container {
           image = "iredmail/mariadb:stable"
           name  = "iredmail"
@@ -255,7 +272,7 @@ resource "kubernetes_deployment_v1" "mail-server" {
           volume_mount {
             name       = "dkim"
             mount_path = "/opt/iredmail/custom/amavisd/dkim"
-            read_only  = true
+            read_only  = false
           }
         }
         volume {
@@ -342,12 +359,6 @@ resource "kubernetes_deployment_v1" "mail-server" {
               key  = "tls.crt"
               path = "cert.pem"
             }
-          }
-        }
-        volume {
-          name = "dkim"
-          secret {
-            secret_name = "dkim"
           }
         }
       }
