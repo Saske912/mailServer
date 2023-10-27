@@ -2,10 +2,6 @@ data "vault_generic_secret" "cloudflare" {
   path = "secret/cloudflare"
 }
 
-provider "cloudflare" {
-  api_token = data.vault_generic_secret.cloudflare.data["token"]
-}
-
 # resource "cloudflare_record" "sfp" {
 #   zone_id = jsondecode(data.vault_generic_secret.cloudflare.data["zone"]).kolve
 #   name    = "@"

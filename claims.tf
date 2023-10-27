@@ -1,112 +1,17 @@
-
-resource "kubernetes_persistent_volume_claim_v1" "vmail" {
+resource "kubernetes_persistent_volume_claim_v1" "claims" {
+  for_each = local.claims
   metadata {
-    namespace = "mail-server"
-    name      = "vmail"
+    namespace = kubernetes_namespace_v1.mail-server.metadata[0].name
+    name      = each.value.name
     labels = {
-      "storage" = "vmail-l"
+      "storage" = "${each.value.name}-l"
     }
   }
   spec {
     access_modes = ["ReadWriteOnce"]
     resources {
       requests = {
-        storage = "7Gi"
-      }
-    }
-  }
-  depends_on = [kubernetes_namespace_v1.mail-server]
-}
-
-resource "kubernetes_persistent_volume_claim_v1" "mysql" {
-  metadata {
-    namespace = "mail-server"
-    name      = "mysql"
-    labels = {
-      "storage" = "mysql-l"
-    }
-  }
-  spec {
-    access_modes = ["ReadWriteOnce"]
-    resources {
-      requests = {
-        storage = "5Gi"
-      }
-    }
-  }
-  depends_on = [kubernetes_namespace_v1.mail-server]
-}
-
-resource "kubernetes_persistent_volume_claim_v1" "clamav" {
-  metadata {
-    namespace = "mail-server"
-    name      = "clamav"
-    labels = {
-      "storage" = "clamav-l"
-    }
-  }
-  spec {
-    access_modes = ["ReadWriteOnce"]
-    resources {
-      requests = {
-        storage = "2Gi"
-      }
-    }
-  }
-  depends_on = [kubernetes_namespace_v1.mail-server]
-}
-
-resource "kubernetes_persistent_volume_claim_v1" "spamassassin" {
-  metadata {
-    namespace = "mail-server"
-    name      = "spamassassin"
-    labels = {
-      "storage" = "spamassassin-l"
-    }
-  }
-  spec {
-    access_modes = ["ReadWriteOnce"]
-    resources {
-      requests = {
-        storage = "2Gi"
-      }
-    }
-  }
-  depends_on = [kubernetes_namespace_v1.mail-server]
-}
-
-resource "kubernetes_persistent_volume_claim_v1" "postfix" {
-  metadata {
-    namespace = "mail-server"
-    name      = "postfix"
-    labels = {
-      "storage" = "postfix-l"
-    }
-  }
-  spec {
-    access_modes = ["ReadWriteOnce"]
-    resources {
-      requests = {
-        storage = "2Gi"
-      }
-    }
-  }
-  depends_on = [kubernetes_namespace_v1.mail-server]
-}
-
-resource "kubernetes_persistent_volume_claim_v1" "custom" {
-  metadata {
-    namespace = "mail-server"
-    name      = "custom"
-    labels = {
-      "storage" = "custom-l"
-    }
-  }
-  spec {
-    access_modes = ["ReadWriteOnce"]
-    resources {
-      requests = {
-        storage = "1Gi"
+        storage = each.value.storage
       }
     }
   }

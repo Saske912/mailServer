@@ -1,5 +1,3 @@
-provider "null" {}
-
 resource "null_resource" "fetch_files" {
   depends_on = [kubernetes_deployment_v1.mail-server]
   for_each   = { for idx, domain in var.domains : idx => domain }

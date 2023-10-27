@@ -24,36 +24,10 @@ terraform {
   }
 }
 
-provider "kubectl" {
-  config_path    = "~/.kube/config"
-  config_context = "default"
-}
-
-provider "vault" {
-  address            = "https://vault.kolve.ru"
-  add_address_to_env = true
-}
-
-provider "kubernetes" {
-  config_path    = "~/.kube/config"
-  config_context = "default"
-}
-
-
 resource "kubernetes_namespace_v1" "mail-server" {
   metadata {
     name = "mail-server"
   }
-}
-
-
-variable "name" {
-  default = "mail-server"
-}
-
-variable "base_domain" {
-  type    = string
-  default = "kolve.ru"
 }
 
 data "vault_generic_secret" "mail" {
@@ -137,99 +111,15 @@ resource "kubernetes_deployment_v1" "mail-server" {
           external-ip   = "true"
           fast-internet = "true"
         }
-        volume {
-          empty_dir {}
-          name = "dkim"
-        }
-        dynamic "init_container" {
-          for_each = var.domains
-
-          content {
-            name    = "init-container-${init_container.key}"
-            image   = "instrumentisto/opendkim"
-            command = ["opendkim-genkey"]
-            args = [
-              "--subdomains",
-              "--domain=${init_container.value.name}",
-              "--selector=${init_container.value.selector}",
-              "--directory=/tmp"
-            ]
-            volume_mount {
-              mount_path = "/tmp"
-              name       = "dkim"
-              read_only  = false
-            }
-          }
-        }
-        init_container {
-          name    = "change-permissions"
-          image   = "alpine"
-          command = ["chmod"]
-          args    = ["-R", "755", "/tmp"]
-          volume_mount {
-            mount_path = "/tmp"
-            name       = "dkim"
-            read_only  = false
-          }
-        }
         container {
           image = "iredmail/mariadb:stable"
           name  = "iredmail"
-          volume_mount {
-            name       = "vmail"
-            mount_path = "/var/vmail"
-          }
-          volume_mount {
-            name       = "mysql"
-            mount_path = "/var/lib/mysql"
-          }
-          volume_mount {
-            name       = "clamav"
-            mount_path = "/var/lib/clamav"
-          }
-          volume_mount {
-            name       = "spamassassin"
-            mount_path = "/var/lib/spamassassin"
-          }
-          volume_mount {
-            name       = "postfix"
-            mount_path = "/var/spool/postfix"
-          }
-          # volume_mount {
-          #   name       = "custom"
-          #   mount_path = "/opt/iredmail/custom"
-          # }
-          port {
-            container_port = 80
-            name           = "http"
-          }
-          port {
-            container_port = 443
-            name           = "https"
-          }
-          port {
-            container_port = 110
-            name           = "pop3-tls"
-          }
-          port {
-            container_port = 995
-            name           = "pop3-ssl"
-          }
-          port {
-            container_port = 143
-            name           = "imap-tls"
-          }
-          port {
-            container_port = 993
-            name           = "imap-ssl"
-          }
-          port {
-            container_port = 25
-            name           = "smtp"
-          }
-          port {
-            container_port = 587
-            name           = "smtp-tls"
+          dynamic "port" {
+            for_each = local.ports
+            content {
+              container_port = each.value.number
+              name           = each.value.name
+            }
           }
           env_from {
             config_map_ref {
@@ -241,22 +131,16 @@ resource "kubernetes_deployment_v1" "mail-server" {
               name = var.name
             }
           }
-          volume_mount {
-            name       = "key"
-            mount_path = "/opt/iredmail/ssl/key.pem"
-            sub_path   = "key.pem"
-            read_only  = true
+          dynamic "volume_mount" {
+            for_each = local.claims
+            content {
+              name       = each.value.name
+              mount_path = each.value.path
+            }
           }
           volume_mount {
-            name       = "cert"
-            mount_path = "/opt/iredmail/ssl/cert.pem"
-            sub_path   = "cert.pem"
-            read_only  = true
-          }
-          volume_mount {
-            name       = "combined"
-            mount_path = "/opt/iredmail/ssl/combined.pem"
-            sub_path   = "combined.pem"
+            name       = "tls"
+            mount_path = "/opt/iredmail/ssl/"
             read_only  = true
           }
           volume_mount {
@@ -275,40 +159,13 @@ resource "kubernetes_deployment_v1" "mail-server" {
             read_only  = false
           }
         }
-        volume {
-          name = "vmail"
-          persistent_volume_claim {
-            claim_name = "vmail"
-          }
-        }
-        # volume {
-        #   name = "custom"
-        #   persistent_volume_claim {
-        #     claim_name = "custom"
-        #   }
-        # }
-        volume {
-          name = "mysql"
-          persistent_volume_claim {
-            claim_name = "mysql"
-          }
-        }
-        volume {
-          name = "clamav"
-          persistent_volume_claim {
-            claim_name = "clamav"
-          }
-        }
-        volume {
-          name = "spamassassin"
-          persistent_volume_claim {
-            claim_name = "spamassassin"
-          }
-        }
-        volume {
-          name = "postfix"
-          persistent_volume_claim {
-            claim_name = "postfix"
+        dynamic "volume" {
+          for_each = local.claims
+          content {
+            name = each.value.name
+            persistent_volume_claim {
+              claim_name = each.value.name
+            }
           }
         }
         volume {
@@ -332,29 +189,17 @@ resource "kubernetes_deployment_v1" "mail-server" {
           }
         }
         volume {
-          name = "combined"
+          name = "tls"
           secret {
             secret_name = "mail-tls"
             items {
               key  = "tls-combined.pem"
               path = "combined.pem"
             }
-          }
-        }
-        volume {
-          name = "key"
-          secret {
-            secret_name = "mail-tls"
             items {
               key  = "tls.key"
               path = "key.pem"
             }
-          }
-        }
-        volume {
-          name = "cert"
-          secret {
-            secret_name = "mail-tls"
             items {
               key  = "tls.crt"
               path = "cert.pem"
@@ -379,51 +224,14 @@ resource "kubernetes_service_v1" "mail-server" {
     selector = {
       "app" = "mail-server"
     }
-    port {
-      port        = 80
-      name        = "http"
-      target_port = "http"
-    }
-    port {
-      port        = 443
-      name        = "https"
-      target_port = "https"
-    }
-    port {
-      port        = 110
-      name        = "pop3-tls"
-      target_port = "pop3-tls"
-      node_port   = 31726
-    }
-    port {
-      port        = 25
-      name        = "smtp"
-      target_port = "smtp"
-      node_port   = 30781
-    }
-    port {
-      port        = 587
-      name        = "smtp-tls"
-      target_port = "smtp-tls"
-      node_port   = 32658
-    }
-    port {
-      port        = 143
-      name        = "imap-tls"
-      target_port = "imap-tls"
-      node_port   = 32314
-    }
-    port {
-      port        = 993
-      name        = "imap-ssl"
-      target_port = "imap-ssl"
-      node_port   = 30918
-    }
-    port {
-      port        = 995
-      name        = "pop3-ssl"
-      target_port = "pop3-ssl"
-      node_port   = 32336
+    dynamic "port" {
+      for_each = local.ports
+      content {
+        port        = each.value.number
+        target_port = each.value.name
+        name        = each.value.name
+        node_port   = can(each.value.node_port) ? each.value.node_port : null
+      }
     }
   }
 }
