@@ -22,18 +22,24 @@ data "vault_generic_secret" "cloudflare" {
 #   ttl     = 1
 # }
 
-# resource "cloudflare_record" "dkim" {
-#   zone_id = jsondecode(data.vault_generic_secret.cloudflare.data["zone"]).kolve
-#   name    = "kolve._domainkey" # The subdomain where you want to create the DKIM record
-#   type    = "TXT"              # Type should be TXT for DKIM records
-#   ttl     = 1
-#   value   = <<EOT
-#   v=DKIM1;h=sha256;k=rsa;p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDZxfKG8HVCLq
-#   Io/eyY9LF50WO03Sf0cSr7cQ3MGWkN73CUYzB86UiCBWQ+A3rBhCc880uoy1uFVZUFuPXlaxJkn
-#   upJucmnGGTgLcg+ZPRbifyKsrAh3MN0PlvqsapkRqhuBPRmtB77ujGg1wYK7wAemSRGB++znMKA
-#   kp8iKKNzRwIDAQAB
-#   EOT
-# }
+resource "cloudflare_record" "dkim" {
+  depends_on = [null_resource.fetch_files]
+  for_each = {
+    for domain in var.domains : domain.selector => {
+      file_content = file(".cache/${domain.selector}.txt")
+      name         = domain.name
+    }
+  }
+  zone_id = jsondecode(data.vault_generic_secret.cloudflare.data["zone"]).kolve
+  name    = format("%s%s%s", regex("^(.+?)_domainkey", each.value.file_content)[0], "_domainkey.", each.value.name)
+  type    = "TXT"
+  ttl     = 1
+  value   = format("%s%s", "v=DKIM1; k=rsa; p=", regex("p=(.+?)\"", each.value.file_content)[0])
+}
+
+output "record" {
+  value = cloudflare_record.dkim["kolve"].name
+}
 
 resource "cloudflare_record" "MX" {
   zone_id  = jsondecode(data.vault_generic_secret.cloudflare.data["zone"]).kolve

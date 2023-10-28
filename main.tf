@@ -84,8 +84,8 @@ EOT
 }
 
 resource "kubernetes_deployment_v1" "mail-server" {
-  depends_on = [kubernetes_persistent_volume_claim_v1.clamav, kubernetes_persistent_volume_claim_v1.mysql,
-  kubernetes_persistent_volume_claim_v1.vmail, kubectl_manifest.mail-tls]
+  depends_on = [kubernetes_persistent_volume_claim_v1.claims,
+  kubernetes_job.dkim]
   metadata {
     name      = "mail-server"
     namespace = var.name
@@ -117,8 +117,8 @@ resource "kubernetes_deployment_v1" "mail-server" {
           dynamic "port" {
             for_each = local.ports
             content {
-              container_port = each.value.number
-              name           = each.value.name
+              container_port = port.value.number
+              name           = port.value.name
             }
           }
           env_from {
@@ -134,14 +134,9 @@ resource "kubernetes_deployment_v1" "mail-server" {
           dynamic "volume_mount" {
             for_each = local.claims
             content {
-              name       = each.value.name
-              mount_path = each.value.path
+              name       = volume_mount.value.name
+              mount_path = volume_mount.value.path
             }
-          }
-          volume_mount {
-            name       = "tls"
-            mount_path = "/opt/iredmail/ssl/"
-            read_only  = true
           }
           volume_mount {
             name       = "clamfail"
@@ -156,15 +151,25 @@ resource "kubernetes_deployment_v1" "mail-server" {
           volume_mount {
             name       = "dkim"
             mount_path = "/opt/iredmail/custom/amavisd/dkim"
-            read_only  = false
+
+            read_only = false
+          }
+          dynamic "volume_mount" {
+            for_each = local.tls
+            content {
+              name       = volume_mount.value.name
+              mount_path = volume_mount.value.mount_path
+              sub_path   = volume_mount.value.path
+              read_only  = false
+            }
           }
         }
         dynamic "volume" {
           for_each = local.claims
           content {
-            name = each.value.name
+            name = volume.value.name
             persistent_volume_claim {
-              claim_name = each.value.name
+              claim_name = volume.value.name
             }
           }
         }
@@ -189,20 +194,21 @@ resource "kubernetes_deployment_v1" "mail-server" {
           }
         }
         volume {
-          name = "tls"
-          secret {
-            secret_name = "mail-tls"
-            items {
-              key  = "tls-combined.pem"
-              path = "combined.pem"
-            }
-            items {
-              key  = "tls.key"
-              path = "key.pem"
-            }
-            items {
-              key  = "tls.crt"
-              path = "cert.pem"
+          name = "dkim"
+          persistent_volume_claim {
+            claim_name = kubernetes_persistent_volume_claim.dkim.metadata[0].name
+          }
+        }
+        dynamic "volume" {
+          for_each = local.tls
+          content {
+            name = volume.value.name
+            secret {
+              secret_name = "mail-tls"
+              items {
+                key  = volume.value.key
+                path = volume.value.path
+              }
             }
           }
         }
@@ -227,10 +233,10 @@ resource "kubernetes_service_v1" "mail-server" {
     dynamic "port" {
       for_each = local.ports
       content {
-        port        = each.value.number
-        target_port = each.value.name
-        name        = each.value.name
-        node_port   = can(each.value.node_port) ? each.value.node_port : null
+        port        = port.value.number
+        target_port = port.value.name
+        name        = port.value.name
+        node_port   = can(port.value.node_port) ? port.value.node_port : null
       }
     }
   }

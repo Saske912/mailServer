@@ -9,7 +9,3 @@ resource "null_resource" "fetch_files" {
     command = "kubectl -n mail-server exec deploy/mail-server iredmail -- cat /opt/iredmail/custom/amavisd/dkim/${each.value.selector}.txt > .cache/${each.value.selector}.txt"
   }
 }
-
-# output "file_content" {
-#   value = file("/путь/к/локальной/папке/файл.txt")
-# }

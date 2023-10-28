@@ -1,4 +1,25 @@
 locals {
+  mount_path = "/opt/iredmail/ssl/"
+  tls = tolist([
+    {
+      name       = "combined"
+      key        = "tls-combined.pem"
+      path       = "combined.pem"
+      mount_path = "${local.mount_path}combined.pem"
+    },
+    {
+      name       = "key"
+      key        = "tls.key"
+      path       = "key.pem"
+      mount_path = "${local.mount_path}key.pem"
+    },
+    {
+      name       = "crt"
+      key        = "tls.crt"
+      path       = "cert.pem"
+      mount_path = "${local.mount_path}cert.pem"
+    },
+  ])
   claims = tolist([
     {
       name    = "vmail"
